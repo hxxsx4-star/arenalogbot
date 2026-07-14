@@ -3,7 +3,12 @@ import json
 import discord
 from discord.ext import commands, tasks
 
-from utils.logs import fetch_pending, mark_posted, mark_failed
+from utils.logs import fetch_pending, mark_posted, mark_failed, purge_posted
+
+# 한 번에 처리할 로그 수 (초당 처리량 = BATCH / 루프주기)
+DRAIN_BATCH = 100
+# 정리: 전송 완료 후 이 시간(초)이 지난 로그는 큐에서 삭제 (기본 3일)
+PURGE_OLDER_THAN_SEC = 3 * 24 * 3600
 
 
 class LogRelayCog(commands.Cog):
@@ -14,14 +19,16 @@ class LogRelayCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.drain_queue.start()
+        self.cleanup_queue.start()
 
     def cog_unload(self):
         self.drain_queue.cancel()
+        self.cleanup_queue.cancel()
 
-    @tasks.loop(seconds=2)
+    @tasks.loop(seconds=1.5)
     async def drain_queue(self):
         try:
-            rows = await fetch_pending(30)
+            rows = await fetch_pending(DRAIN_BATCH)
         except Exception as e:
             print(f"🚨 로그 큐 조회 실패: {e}")
             return
@@ -44,8 +51,25 @@ class LogRelayCog(commands.Cog):
         await mark_posted(posted)
         await mark_failed(failed)
 
+    @tasks.loop(hours=6)
+    async def cleanup_queue(self):
+        """큐 DB가 무한정 커지지 않도록 오래된(전송 완료) 로그를 주기적으로 정리."""
+        try:
+            # 하루 한 번꼴(매 4번째 실행)로만 VACUUM 실행해 파일 크기까지 회수
+            do_vacuum = (getattr(self, "_cleanup_ticks", 0) % 4) == 0
+            self._cleanup_ticks = getattr(self, "_cleanup_ticks", 0) + 1
+            deleted = await purge_posted(PURGE_OLDER_THAN_SEC, vacuum=do_vacuum)
+            if deleted:
+                print(f"🧹 로그 큐 정리: {deleted}건 삭제 (vacuum={do_vacuum})")
+        except Exception as e:
+            print(f"🚨 로그 큐 정리 실패: {e}")
+
     @drain_queue.before_loop
     async def before_drain(self):
+        await self.bot.wait_until_ready()
+
+    @cleanup_queue.before_loop
+    async def before_cleanup(self):
         await self.bot.wait_until_ready()
 
 

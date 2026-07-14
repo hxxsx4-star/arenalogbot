@@ -1,0 +1,56 @@
+# 종합게임 아레나 - 4개 봇 통합 실행 (docker compose)
+#
+# 사용 전제: 4개 리포를 같은 상위 폴더에 나란히 clone 해야 합니다.
+#   arena/
+#     ├─ arenalogbot/    (이 파일이 여기 있음)
+#     ├─ arenapetbot/
+#     ├─ arenamatchbot/
+#     └─ arenamainbot/
+#
+# 실행:  arenalogbot 폴더에서
+#   cp .env.example .env   # 4개 봇 토큰 입력
+#   docker compose up -d --build
+#
+# 'shared' 볼륨을 4봇이 공유 → stats.json(포인트) / log_queue.db(로그 큐) 공유됨.
+
+services:
+  logbot:
+    build: ../arenalogbot
+    environment:
+      - DISCORD_TOKEN=${LOG_BOT_TOKEN}
+      - ARENA_SHARED_DIR=/data
+    volumes:
+      - shared:/data
+    restart: unless-stopped
+
+  petbot:
+    build: ../arenapetbot
+    environment:
+      - DISCORD_TOKEN=${PET_BOT_TOKEN}
+      - ARENA_SHARED_DIR=/data
+      - ARENA_DB_PATH=/data/pet_legends.db
+    volumes:
+      - shared:/data
+    restart: unless-stopped
+
+  matchbot:
+    build: ../arenamatchbot
+    environment:
+      - DISCORD_TOKEN=${MATCH_BOT_TOKEN}
+      - ARENA_SHARED_DIR=/data
+      - ARENA_DB_PATH=/data/match_legends.db
+    volumes:
+      - shared:/data
+    restart: unless-stopped
+
+  mainbot:
+    build: ../arenamainbot
+    environment:
+      - DISCORD_TOKEN=${MAIN_BOT_TOKEN}
+      - ARENA_SHARED_DIR=/data
+    volumes:
+      - shared:/data
+    restart: unless-stopped
+
+volumes:
+  shared:
