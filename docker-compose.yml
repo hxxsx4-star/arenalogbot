@@ -52,5 +52,19 @@ services:
       - shared:/data
     restart: unless-stopped
 
+  # 경매 웹사이트 (arenamatch.p-e.kr) — 내전봇 이미지를 재사용, 실행 명령만 uvicorn 으로.
+  # 경매 결과는 /data 공유 큐에 적재 → 로그봇이 내전 로그 채널에 기록.
+  auctionweb:
+    build: ../arenamatchbot
+    command: uvicorn web.server:app --host 0.0.0.0 --port 8000
+    environment:
+      - ARENA_SHARED_DIR=/data
+      - PUBLIC_BASE_URL=${AUCTION_PUBLIC_URL:-}
+    ports:
+      - "8000:8000"
+    volumes:
+      - shared:/data
+    restart: unless-stopped
+
 volumes:
   shared:
