@@ -1,0 +1,16 @@
+[Unit]
+Description=Arena Match Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hxxsx4
+WorkingDirectory=/home/hxxsx4/arena/arenamatchbot
+Environment=ARENA_SHARED_DIR=/home/hxxsx4/shared_data
+ExecStart=/usr/bin/python3 main.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
