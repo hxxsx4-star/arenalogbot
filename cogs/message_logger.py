@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 
-from utils.logs import CHAT_LOG_CH
+from utils.logs import CHAT_LOG_CH, is_target_guild
 
 
 class MessageLoggerCog(commands.Cog):
@@ -29,8 +29,8 @@ class MessageLoggerCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message):
-        # 봇의 메시지가 삭제된 경우 무시
-        if message.author.bot:
+        # 봇의 메시지거나 대상 서버가 아니면 무시
+        if message.author.bot or not is_target_guild(message.guild):
             return
 
         embed = discord.Embed(
@@ -58,8 +58,8 @@ class MessageLoggerCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message_edit(self, before: discord.Message, after: discord.Message):
-        # 봇의 메시지가 수정된 경우 무시
-        if before.author.bot:
+        # 봇의 메시지거나 대상 서버가 아니면 무시
+        if before.author.bot or not is_target_guild(before.guild):
             return
 
         # 디스코드는 임베드가 생성되거나 링크 미리보기가 뜰 때도 edit 이벤트를 발생시킵니다.

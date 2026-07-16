@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 from datetime import datetime
 
-from utils.logs import JOIN_LOG_CH, LEAVE_LOG_CH
+from utils.logs import JOIN_LOG_CH, LEAVE_LOG_CH, is_target_guild
 
 
 class MemberTrackerCog(commands.Cog):
@@ -30,6 +30,8 @@ class MemberTrackerCog(commands.Cog):
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
         """멤버가 서버에 들어왔을 때 로그를 기록합니다."""
+        if not is_target_guild(member.guild):
+            return
         embed = discord.Embed(
             title="👋 멤버 입장",
             description=f"{member.mention} ({member.name}) 님이 서버에 입장하셨습니다!",
@@ -45,6 +47,8 @@ class MemberTrackerCog(commands.Cog):
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
         """멤버가 서버를 나갔을 때(추방 포함) 로그를 기록합니다."""
+        if not is_target_guild(member.guild):
+            return
         embed = discord.Embed(
             title="👣 멤버 퇴장",
             description=f"{member.mention} ({member.name}) 님이 서버를 나갔습니다.",

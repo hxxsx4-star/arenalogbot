@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import discord
 from discord.ext import commands
 
-from utils.logs import VOICE_LOG_CH
+from utils.logs import VOICE_LOG_CH, is_target_guild
 
 # 감사 로그로 "누가 옮겼는지 / 누가 끊었는지" 추적할 때 인정할 시간 창(초)
 _AUDIT_WINDOW_SEC = 6
@@ -57,7 +57,7 @@ class VoiceLoggerCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
-        if member.bot:
+        if member.bot or not is_target_guild(member.guild):
             return
 
         # 1) 음성 채널 입장 (본인 행동만 가능)
