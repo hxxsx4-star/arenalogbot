@@ -3,11 +3,40 @@ from discord.ext import commands
 
 from utils.logs import CHAT_LOG_CH, is_target_guild
 
+# 감사 로그로 "누가 지웠는지" 추적할 때 인정할 시간 창(초)
+_AUDIT_WINDOW_SEC = 6
+
 
 class MessageLoggerCog(commands.Cog):
     """메시지 수정/삭제(채팅) 로그를 기록하는 Cog"""
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+
+    async def _find_deleter(self, message: discord.Message):
+        """감사 로그에서 이 메시지를 지운 '다른 사람'을 찾습니다.
+
+        디스코드는 본인이 지운 메시지에는 감사 로그를 남기지 않으므로,
+        최근 message_delete 항목 중 대상(작성자)이 일치하고 실행자가 작성자
+        본인이 아닌 경우에만 실행자를 반환합니다. (best-effort)
+        """
+        guild = message.guild
+        if guild is None:
+            return None
+        try:
+            async for entry in guild.audit_logs(limit=5, action=discord.AuditLogAction.message_delete):
+                if (discord.utils.utcnow() - entry.created_at).total_seconds() > _AUDIT_WINDOW_SEC:
+                    break
+                target_id = getattr(getattr(entry, "target", None), "id", None)
+                if target_id is not None and target_id != message.author.id:
+                    continue
+                if entry.user and entry.user.id == message.author.id:
+                    return None  # 본인이 삭제
+                return entry.user
+        except discord.Forbidden:
+            print("[chat audit] 감사 로그 접근 권한이 없습니다. (봇에 '감사 로그 보기' 권한 필요)")
+        except Exception as e:
+            print(f"[chat audit] 조회 실패: {e}")
+        return None
 
     async def _send_log(self, embed: discord.Embed):
         """지정된 채널로 로그 임베드를 전송하는 헬퍼 함수"""
@@ -33,8 +62,14 @@ class MessageLoggerCog(commands.Cog):
         if message.author.bot or not is_target_guild(message.guild):
             return
 
+        deleter = await self._find_deleter(message)
+        if deleter:
+            desc = (f"🗑️ **{message.author.mention}** 님의 메시지가 {message.channel.mention}에서 "
+                    f"삭제되었습니다.\n삭제한 사람: {deleter.mention}")
+        else:
+            desc = f"🗑️ **{message.author.mention}** 님이 {message.channel.mention}에서 메시지를 삭제했습니다."
         embed = discord.Embed(
-            description=f"🗑️ **{message.author.mention}** 님이 {message.channel.mention}에서 메시지를 삭제했습니다.",
+            description=desc,
             color=discord.Color.red(),
             timestamp=discord.utils.utcnow()
         )
@@ -45,6 +80,8 @@ class MessageLoggerCog(commands.Cog):
             content = content[:1020] + "..."
 
         embed.add_field(name="삭제된 내용", value=content, inline=False)
+        if deleter:
+            embed.add_field(name="삭제한 사람", value=f"{deleter.mention} (`{deleter.id}`)", inline=False)
 
         # 첨부파일이 있었을 경우 파일 URL 기록
         if message.attachments:

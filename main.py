@@ -35,6 +35,7 @@ class LogBot(commands.Bot):
             "cogs.message_logger",   # 채팅(수정/삭제) 로그
             "cogs.voice_logger",     # 음성 로그 (이동/연결끊김 실행자 포함)
             "cogs.ban_logger",       # 서버 차단/해제 로그
+            "cogs.role_logger",      # 역할 지급/회수 로그 (실행자 포함)
         ]
         for cog in cogs_to_load:
             try:
