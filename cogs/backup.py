@@ -45,8 +45,18 @@ def _skip(path: str) -> bool:
     return base in EXCLUDE_NAMES or base.endswith(EXCLUDE_SUFFIX)
 
 
+# 백업하지 않는 DB. 전송 완료된 로그 큐라 복구 가치가 없고 계속 커진다.
+SKIP_DBS = {"log_queue.db"}
+
+
 def _collect() -> list:
-    """백업 대상 경로 목록."""
+    """백업 대상 경로 목록.
+
+    데이터는 전부 공유 폴더(SHARED_DIR)에 있다. 예전엔 각 저장소 폴더의
+    legends.db / predictions.db 를 찾았는데, 도커 전환 후 실제 DB 는 공유 폴더로
+    옮겨졌고 저장소 쪽엔 7월에 멈춘 잔재만 남아 있었다.
+    (= 살아있는 데이터가 하나도 백업되지 않고 죽은 파일만 담기고 있었음)
+    """
     targets = []
     # 공유 데이터 (포인트/레벨/닉네임 등 — 가장 중요)
     p = os.path.join(SHARED_DIR, "stats.json")
@@ -60,12 +70,14 @@ def _collect() -> list:
     p = os.path.join(SHARED_DIR, "auctions")
     if os.path.isdir(p):
         targets.append(p)
-    # 봇 DB (펫/예측 등)
-    for repo in ("arenapetbot", "arenamatchbot", "arenamainbot"):
-        for db in ("legends.db", "predictions.db"):
-            p = os.path.join(ARENA_ROOT, repo, db)
-            if os.path.isfile(p):
-                targets.append(p)
+    # 공유 폴더의 모든 DB (내전/펫/포켓몬/승부예측/음성방 설정)
+    # 새 DB 가 생겨도 자동으로 포함되도록 목록을 하드코딩하지 않는다.
+    for name in sorted(os.listdir(SHARED_DIR)) if os.path.isdir(SHARED_DIR) else []:
+        if not name.endswith(".db") or name in SKIP_DBS:
+            continue
+        p = os.path.join(SHARED_DIR, name)
+        if os.path.isfile(p):
+            targets.append(p)
     return targets
 
 
