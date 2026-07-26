@@ -1,17 +1,21 @@
-# 종합게임 아레나 - 4개 봇 통합 실행 (docker compose)
+# 종합게임 아레나 - 5개 봇 + 경매 웹 통합 실행 (docker compose)
 #
-# 사용 전제: 4개 리포를 같은 상위 폴더에 나란히 clone 해야 합니다.
-#   arena/
+# 사용 전제: 리포 배치
+#   ~/arena/
 #     ├─ arenalogbot/    (이 파일이 여기 있음)
 #     ├─ arenapetbot/
 #     ├─ arenamatchbot/
 #     └─ arenamainbot/
+#   ~/voiceroombot/      (arena 밖, 상위 폴더에 위치)
 #
 # 실행:  arenalogbot 폴더에서
-#   cp .env.example .env   # 4개 봇 토큰 입력
+#   cp .env.example .env   # 봇 토큰 입력
 #   docker compose up -d --build
 #
-# 'shared' 볼륨을 4봇이 공유 → stats.json(포인트) / log_queue.db(로그 큐) 공유됨.
+# 호스트 /home/hxxsx4/shared_data 를 전 봇이 /data 로 공유
+#   → stats.json(포인트) / log_queue.db(로그 큐) 공유됨.
+# named volume 대신 호스트 폴더를 직접 마운트한다: 파일을 밖에서 바로 보고 백업할 수 있고,
+# 예전처럼 '볼륨 따로 / 호스트 따로' 로 데이터가 갈라지는 사고를 막는다.
 
 services:
   logbot:
@@ -20,7 +24,7 @@ services:
       - DISCORD_TOKEN=${LOG_BOT_TOKEN}
       - ARENA_SHARED_DIR=/data
     volumes:
-      - shared:/data
+      - /home/hxxsx4/shared_data:/data
     restart: unless-stopped
 
   petbot:
@@ -29,8 +33,9 @@ services:
       - DISCORD_TOKEN=${PET_BOT_TOKEN}
       - ARENA_SHARED_DIR=/data
       - ARENA_DB_PATH=/data/pet_legends.db
+      - ARENA_POKEMON_DB_PATH=/data/pokedex.db
     volumes:
-      - shared:/data
+      - /home/hxxsx4/shared_data:/data
     restart: unless-stopped
 
   matchbot:
@@ -40,7 +45,7 @@ services:
       - ARENA_SHARED_DIR=/data
       - ARENA_DB_PATH=/data/match_legends.db
     volumes:
-      - shared:/data
+      - /home/hxxsx4/shared_data:/data
     restart: unless-stopped
 
   mainbot:
@@ -48,23 +53,39 @@ services:
     environment:
       - DISCORD_TOKEN=${MAIN_BOT_TOKEN}
       - ARENA_SHARED_DIR=/data
+      # 티어 인증(riot_verify)용. 없으면 인증 기능이 조용히 비활성화된다.
+      - RIOT_API_KEY=${RIOT_API_KEY:-}
     volumes:
-      - shared:/data
+      - /home/hxxsx4/shared_data:/data
     restart: unless-stopped
 
-  # 경매 웹사이트 (arenamatch.p-e.kr) — 내전봇 이미지를 재사용, 실행 명령만 uvicorn 으로.
+  voicebot:
+    build: ../../voiceroombot
+    environment:
+      - DISCORD_TOKEN=${VOICE_BOT_TOKEN}
+      - ARENA_SHARED_DIR=/data
+      - ARENA_DB_PATH=/data/voice_settings.db
+    volumes:
+      - /home/hxxsx4/shared_data:/data
+    restart: unless-stopped
+
+  # 아레나 사이트 (arenamatch.p-e.kr) — 내전봇 이미지를 재사용, 실행 명령만 uvicorn 으로.
+  # arenasite 앱이 루트를 담당하고, 경매 앱(web.server)을 /auction 하위에 마운트한다.
+  # (web.server 를 직접 띄우면 /summoners·/betting·/records·/ladder 가 404 가 된다.)
   # 경매 결과는 /data 공유 큐에 적재 → 로그봇이 내전 로그 채널에 기록.
-  auctionweb:
+  arenasite:
     build: ../arenamatchbot
-    command: uvicorn web.server:app --host 0.0.0.0 --port 8000
+    command: uvicorn arenasite.server:app --host 0.0.0.0 --port 8100
     environment:
       - ARENA_SHARED_DIR=/data
       - PUBLIC_BASE_URL=${AUCTION_PUBLIC_URL:-}
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID:-}
+      - DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET:-}
+      - RIOT_API_KEY=${RIOT_API_KEY:-}
     ports:
-      - "8000:8000"
+      - "8100:8100"
     volumes:
-      - shared:/data
+      - /home/hxxsx4/shared_data:/data
     restart: unless-stopped
 
-volumes:
-  shared:
