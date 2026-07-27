@@ -35,16 +35,26 @@ class VoiceLoggerCog(commands.Cog):
         else:
             print(f"[ERROR] 음성 로그 채널을 찾을 수 없음: ID {VOICE_LOG_CH}")
 
-    async def _find_actor(self, guild: discord.Guild, action: discord.AuditLogAction, target_id: int = None):
-        """최근 감사 로그에서 해당 액션의 실행자(다른 사람)를 찾습니다. 없으면 None(본인 행동)."""
+    async def _find_actor(self, guild: discord.Guild, action: discord.AuditLogAction,
+                          target_id: int = None, change_key: str = None):
+        """최근 감사 로그에서 해당 액션의 실행자(다른 사람)를 찾습니다. 없으면 None(본인 행동).
+
+        change_key 를 주면 그 항목이 실제로 바뀐 기록만 인정합니다.
+        (member_update 에는 닉네임 변경 등도 섞여 있어, 걸러내지 않으면
+         엉뚱한 사람이 '차단한 사람'으로 표시될 수 있습니다.)
+        """
         try:
-            async for entry in guild.audit_logs(limit=5, action=action):
+            async for entry in guild.audit_logs(limit=8, action=action):
                 if (discord.utils.utcnow() - entry.created_at).total_seconds() > _AUDIT_WINDOW_SEC:
                     break
                 # 대상이 명시된 경우(예: member_disconnect 일부)에는 대상 일치 확인
                 entry_target_id = getattr(getattr(entry, "target", None), "id", None)
                 if entry_target_id is not None and target_id is not None and entry_target_id != target_id:
                     continue
+                if change_key is not None:
+                    changed = {c.attribute for c in getattr(entry, "changes", [])}
+                    if change_key not in changed:
+                        continue
                 # 실행자가 대상 본인이면 '본인 행동'으로 간주
                 if entry.user and entry.user.id == target_id:
                     return None
@@ -99,6 +109,57 @@ class VoiceLoggerCog(commands.Cog):
                 desc = f"↪️ {member.mention} 님이 음성 채널을 '{before.channel.name}'에서 '{after.channel.name}'(으)로 이동했습니다."
                 color = discord.Color.blue()
             embed = discord.Embed(description=desc, color=color, timestamp=datetime.now(timezone.utc))
+            embed.set_footer(text=f"유저 ID: {member.id}")
+            await self._send_log(embed)
+
+        # 4) 같은 채널에 머무르면서 상태만 바뀐 경우
+        #    (마이크/헤드셋 끄기, 서버 차단, 화면 공유, 카메라)
+        else:
+            await self._log_state_change(member, before, after)
+
+    async def _log_state_change(self, member, before, after):
+        """음성 상태 변경 로그. 서버 차단(mute/deaf)은 실행자도 함께 찾는다."""
+        channel = after.channel or before.channel
+        if channel is None:
+            return
+
+        # (before, after, 켜졌을 때 문구, 꺼졌을 때 문구, 감사로그 change key)
+        # change key 가 None 이면 본인만 할 수 있는 조작(디스코드가 타인 조작을 허용하지 않음)
+        checks = [
+            (before.self_mute, after.self_mute,
+             "🔇 마이크를 껐습니다", "🎙️ 마이크를 켰습니다", None),
+            (before.self_deaf, after.self_deaf,
+             "🔕 헤드셋(소리)을 껐습니다", "🔔 헤드셋(소리)을 켰습니다", None),
+            (before.self_stream, after.self_stream,
+             "🖥️ 화면 공유를 시작했습니다", "🖥️ 화면 공유를 종료했습니다", None),
+            (before.self_video, after.self_video,
+             "📹 카메라를 켰습니다", "📷 카메라를 껐습니다", None),
+            (before.mute, after.mute,
+             "🚫 서버 마이크가 차단됐습니다", "✅ 서버 마이크 차단이 해제됐습니다", "mute"),
+            (before.deaf, after.deaf,
+             "🚫 서버 소리가 차단됐습니다", "✅ 서버 소리 차단이 해제됐습니다", "deaf"),
+        ]
+
+        for was, now, on_text, off_text, change_key in checks:
+            if was == now:
+                continue
+            text = on_text if now else off_text
+            if change_key:
+                # 서버 차단/해제는 관리자가 건 것이므로 누가 했는지 찾는다.
+                actor = await self._find_actor(
+                    member.guild, discord.AuditLogAction.member_update,
+                    member.id, change_key=change_key)
+                who = actor.mention if actor else "본인"
+                color = discord.Color.dark_orange()
+            else:
+                # 마이크/헤드셋/화면공유/카메라는 본인만 조작할 수 있다.
+                who = "본인"
+                color = discord.Color.greyple()
+            embed = discord.Embed(
+                description=f"{text} — {member.mention} (`{channel.name}`)\n실행자: {who}",
+                color=color,
+                timestamp=datetime.now(timezone.utc),
+            )
             embed.set_footer(text=f"유저 ID: {member.id}")
             await self._send_log(embed)
 
