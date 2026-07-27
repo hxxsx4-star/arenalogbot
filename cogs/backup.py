@@ -9,6 +9,7 @@
 """
 import os
 import shutil
+import sqlite3
 import tarfile
 import tempfile
 import datetime
@@ -81,6 +82,26 @@ def _collect() -> list:
     return targets
 
 
+def _snapshot_sqlite(src: str, dst_dir: str) -> str:
+    """SQLite DB 를 안전하게 스냅샷한다.
+
+    WAL 모드에서는 최근 변경이 .db 가 아니라 -wal 파일에 있어서, .db 만 복사하면
+    데이터가 통째로 빠진다(실측: 30마리 중 16마리만 담김).
+    sqlite3 백업 API 로 뜨면 WAL 내용까지 합쳐진 온전한 사본이 나온다.
+    """
+    dst = os.path.join(dst_dir, os.path.basename(src))
+    src_conn = sqlite3.connect(f"file:{src}?mode=ro", uri=True, timeout=30)
+    try:
+        dst_conn = sqlite3.connect(dst)
+        try:
+            src_conn.backup(dst_conn)
+        finally:
+            dst_conn.close()
+    finally:
+        src_conn.close()
+    return dst
+
+
 def _make_archive(tmp_path: str) -> tuple:
     """대상들을 tar.gz 로 묶고 (파일수, 원본크기) 반환."""
     count = total = 0
@@ -94,12 +115,18 @@ def _make_archive(tmp_path: str) -> tuple:
             total += info.size
         return info
 
-    with tarfile.open(tmp_path, "w:gz", compresslevel=9) as tar:
-        for path in _collect():
-            if _skip(path):
-                continue
-            tar.add(path, arcname=os.path.relpath(path, os.path.dirname(SHARED_DIR)),
-                    filter=_filter)
+    with tempfile.TemporaryDirectory() as snap_dir:
+        with tarfile.open(tmp_path, "w:gz", compresslevel=9) as tar:
+            for path in _collect():
+                if _skip(path):
+                    continue
+                arc = os.path.relpath(path, os.path.dirname(SHARED_DIR))
+                if path.endswith(".db"):
+                    try:
+                        path = _snapshot_sqlite(path, snap_dir)
+                    except sqlite3.Error as e:
+                        print(f"[백업] {os.path.basename(path)} 스냅샷 실패, 원본 사용: {e}")
+                tar.add(path, arcname=arc, filter=_filter)
     return count, total
 
 
